@@ -6,7 +6,7 @@ JETSTREAM_VERSION = sha-$(shell git rev-parse HEAD)
 .PHONY: build
 build:
 	@echo "Building Jetstream Go binary..."
-	$(GO_CMD_W_CGO) build -o jetstream cmd/jetstream/*.go
+	$(GO_CMD_W_CGO) build  -ldflags="-s -w" -trimpath -o jetstream cmd/jetstream/*.go
 
 # Run Jetstream
 .PHONY: run
