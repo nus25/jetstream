@@ -11,14 +11,15 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/bluesky-social/indigo/events"
-	"github.com/bluesky-social/indigo/events/schedulers/parallel"
+	"github.com/bluesky-social/jetstream/pkg/client"
+	"github.com/bluesky-social/jetstream/pkg/client/schedulers/parallel"
 	"github.com/bluesky-social/jetstream/pkg/consumer"
+	proxy "github.com/bluesky-social/jetstream/pkg/proxy"
 	"github.com/bluesky-social/jetstream/pkg/server"
-	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -28,17 +29,34 @@ import (
 
 func main() {
 	app := cli.App{
-		Name:    "jetstream",
-		Usage:   "atproto firehose translation service",
-		Version: "0.1.0",
+		Name:    "jetstream-proxy",
+		Usage:   "jetstream proxy service",
+		Version: "1.0.7",
 	}
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
 			Name:    "ws-url",
-			Usage:   "full websocket path to the ATProto SubscribeRepos XRPC endpoint",
-			Value:   "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos",
+			Usage:   "full websocket path to the jetstream endpoint",
+			Value:   "ws://localhost:6008/subscribe",
 			EnvVars: []string{"JETSTREAM_WS_URL"},
+		},
+		&cli.StringSliceFlag{
+			Name:    "wanted-collections",
+			Usage:   "comma-separated list of collections",
+			EnvVars: []string{"WANTED_COLLECTIONS"},
+		},
+		&cli.BoolFlag{
+			Name:    "ingress-commpression",
+			Usage:   "enable compression of incoming jetstream",
+			Value:   true,
+			EnvVars: []string{"INGRESS_COMPRESSION"},
+		},
+		&cli.UintFlag{
+			Name:    "max-msg-size-bytes",
+			Usage:   "max message size Bytes of incoming jetstream. default is unlimited.",
+			Value:   0,
+			EnvVars: []string{"MAX_MSG_SIZE_BYTES"},
 		},
 		&cli.IntFlag{
 			Name:    "worker-count",
@@ -90,7 +108,7 @@ func main() {
 		},
 		&cli.Int64Flag{
 			Name:    "override-relay-cursor",
-			Usage:   "override cursor to start from, if not set will start from the last cursor in the database, if no cursor in the database will start from live",
+			Usage:   "override cursor to start from, if not set will start from the last cursor in the database, if no cursor in the database will start from live, if set 0 force from live",
 			Value:   -1,
 			EnvVars: []string{"JETSTREAM_OVERRIDE_RELAY_CURSOR"},
 		},
@@ -142,8 +160,6 @@ func Jetstream(cctx *cli.Context) error {
 	}
 
 	s.Consumer = c
-
-	scheduler := parallel.NewScheduler(cctx.Int("worker-count"), cctx.Int("max-queue-size"), "prod-firehose", c.HandleStreamEvent)
 
 	// Start a goroutine to manage the cursor, saving the current cursor every 5 seconds.
 	shutdownCursorManager := make(chan struct{})
@@ -224,7 +240,7 @@ func Jetstream(cctx *cli.Context) error {
 		AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodOptions},
 	}))
 	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Welcome to Jetstream")
+		return c.String(http.StatusOK, "Welcome to Jetstream proxy")
 	})
 	e.GET("/subscribe", s.HandleSubscribe)
 
@@ -291,18 +307,26 @@ func Jetstream(cctx *cli.Context) error {
 		cursor = &cursorOverride
 	}
 
-	// If the cursor is nil, we are starting from live
-	if cursor != nil {
-		u.RawQuery = fmt.Sprintf("cursor=%d", *cursor)
+	h := &proxy.Handler{
+		LastSeq:  -1,
+		Consumer: c,
+		NextMet:  -1,
 	}
+	logger := slog.Default()
+	//単一の非同期ワーカーとして動作させる。
+	sched := parallel.NewScheduler(1, "jetstream-proxy", logger, h.HandleEvent)
+	config := client.DefaultClientConfig()
+	config.WantedCollections = cctx.StringSlice("wanted-collections")
+	config.WebsocketURL = u.String()
+	log.Info(strings.Join(config.WantedCollections, ","))
+	config.Compress = cctx.Bool("ingress-commpression")
+	config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
 
-	log.Info("connecting to websocket", "url", u.String())
-	con, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	jsc, err := client.NewClient(config, log, sched)
 	if err != nil {
-		log.Error("failed to connect to websocket", "error", err)
+		log.Error("failed to create jetstream client", "error", err)
 		return err
 	}
-	defer con.Close()
 
 	// Create a channel that will be closed when we want to stop the application
 	// Usually when a critical routine returns an error
@@ -314,9 +338,10 @@ func Jetstream(cctx *cli.Context) error {
 		ctx := context.Background()
 		ctx, cancel := context.WithCancel(ctx)
 		go func() {
-			err = events.HandleRepoStream(ctx, con, scheduler)
+			//jetstream proxy
+			err = proxy.HandleRepoStream(ctx, jsc, cursor)
 			if !errors.Is(err, context.Canceled) {
-				log.Info("HandleRepoStream returned unexpectedly, killing jetstream", "error", err)
+				log.Info("HandleRepoStream returned unexpectedly, killing jetstream proxy", "error", err)
 				close(eventsKill)
 			} else {
 				log.Info("HandleRepoStream closed on context cancel")

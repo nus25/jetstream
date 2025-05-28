@@ -30,6 +30,7 @@ type Scheduler struct {
 	itemsProcessed prometheus.Counter
 	itemsActive    prometheus.Counter
 	workersActive  prometheus.Gauge
+	itemsQueued    prometheus.Gauge
 }
 
 // NewScheduler creates a new parallel scheduler with the given number of workers
@@ -51,6 +52,7 @@ func NewScheduler(numWorkers int, ident string, logger *slog.Logger, handleEvent
 		itemsActive:    schedulers.WorkItemsActive.WithLabelValues(ident, "parallel"),
 		itemsProcessed: schedulers.WorkItemsProcessed.WithLabelValues(ident, "parallel"),
 		workersActive:  schedulers.WorkersActive.WithLabelValues(ident, "parallel"),
+		itemsQueued:    schedulers.WorkItemsQueued.WithLabelValues(ident, "parallel"),
 	}
 
 	p.wg.Add(numWorkers)
@@ -99,6 +101,7 @@ func (p *Scheduler) AddWork(ctx context.Context, repo string, val *models.Event)
 
 	// Append to the active list if there is already work for this repository
 	p.lk.Lock()
+	p.itemsQueued.Inc()
 	a, ok := p.active[repo]
 	if ok {
 		p.active[repo] = append(a, t)
@@ -132,7 +135,7 @@ func (p *Scheduler) worker() {
 				p.logger.Error("event handler failed", "error", err)
 			}
 			p.itemsProcessed.Inc()
-
+			p.itemsQueued.Dec()
 			p.lk.Lock()
 			rem, ok := p.active[work.repo]
 			if !ok {

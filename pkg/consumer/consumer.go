@@ -393,3 +393,8 @@ func (c *Consumer) Shutdown() {
 		c.logger.Info("sequencer shutdown complete")
 	}
 }
+
+
+func (c *Consumer) AddEvent(event *models.Event) {
+	c.buf <- event;
+}

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
 	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/goccy/go-json"
@@ -78,6 +81,13 @@ func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler) (
 	return &c, nil
 }
 
+func (c *Client) SendPing() error {
+	if err := c.con.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(time.Second*10)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	header := http.Header{}
 	for k, v := range c.config.ExtraHeaders {
@@ -85,8 +95,12 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	}
 
 	fullURL := c.config.WebsocketURL
+	c.logger.Info("fullurl: " + fullURL)
 	params := []string{}
-	if cursor != nil {
+	if c.config.Compress {
+		params = append(params, "compress=true")
+	}
+	if cursor != nil && *cursor != int64(0) && *cursor != int64(-1) {
 		params = append(params, fmt.Sprintf("cursor=%d", *cursor))
 	}
 
@@ -99,14 +113,11 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	}
 
 	if c.config.MaxSize > 0 {
-		params = append(params, fmt.Sprintf("maxSize=%d", c.config.MaxSize))
+		params = append(params, fmt.Sprintf("maxMessageSizeBytes=%d", c.config.MaxSize))
 	}
 
 	if len(params) > 0 {
-		fullURL += "?" + params[0]
-		for _, p := range params[1:] {
-			fullURL += "&" + p
-		}
+		fullURL += "?" + strings.Join(params, "&")
 	}
 
 	u, err := url.Parse(fullURL)
@@ -119,6 +130,30 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	if err != nil {
 		return err
 	}
+
+	//ホストjetstreamとのping&pong設定
+	con.SetPingHandler(func(message string) error {
+		err := c.con.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(time.Second*60))
+		if err == websocket.ErrCloseSent {
+			return nil
+		} else if e, ok := err.(net.Error); ok && e.Temporary() {
+			return nil
+		}
+		return err
+	})
+
+	con.SetPongHandler(func(_ string) error {
+		if err := c.con.SetReadDeadline(time.Now().Add(time.Minute)); err != nil {
+			return fmt.Errorf("failed to set read deadline: %s", err)
+		}
+		return nil
+	})
+
+	con.SetCloseHandler(func(code int, text string) error {
+		c.logger.Info("connection closed", "code", code, "text", text)
+		c.Scheduler.Shutdown()
+		return nil
+	})
 
 	c.con = con
 
@@ -178,8 +213,8 @@ func (c *Client) readLoop(ctx context.Context) error {
 				c.logger.Error("failed to unmarshal event", "error", err)
 				return fmt.Errorf("failed to unmarshal event: %w", err)
 			}
-
-			if err := c.Scheduler.AddWork(ctx, event.Did, &event); err != nil {
+			// Treat incomming events as one repo stream
+			if err := c.Scheduler.AddWork(ctx, "jetstream", &event); err != nil {
 				c.logger.Error("failed to add work to scheduler", "error", err)
 				return fmt.Errorf("failed to add work to scheduler: %w", err)
 			}

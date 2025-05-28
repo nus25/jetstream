@@ -24,3 +24,8 @@ var WorkersActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "jetstream_scheduler_workers_active",
 	Help: "Number of workers currently active",
 }, []string{"pool", "scheduler_type"})
+
+var WorkItemsQueued = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "jetstream_scheduler_work_items_queued",
+	Help: "Number of work items currently queued in the scheduler",
+}, []string{"pool", "scheduler_type"})
