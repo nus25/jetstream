@@ -376,6 +376,7 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownMetrics)
 
 	shutdownTimeout := time.After(10 * time.Second)
+	minShutdownWait := time.After(3 * time.Second)
 
 	select {
 	case <-repoStreamShutdown:
@@ -424,6 +425,12 @@ func Jetstream(cctx *cli.Context) error {
 		log.Error("failed to close compressed pebble db", "error", err)
 	}
 
+	select {
+	case <-minShutdownWait:
+		log.Info("min shutdown wait completed")
+	case <-shutdownTimeout:
+		log.Warn("Shutdown timeout reached for min shutdown wait")
+	}
 	log.Info("shut down successfully")
 
 	return nil
