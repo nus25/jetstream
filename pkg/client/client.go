@@ -99,7 +99,7 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	}
 
 	if c.config.MaxSize > 0 {
-		params = append(params, fmt.Sprintf("maxSize=%d", c.config.MaxSize))
+		params = append(params, fmt.Sprintf("maxMessageSizeBytes=%d", c.config.MaxSize))
 	}
 
 	if len(params) > 0 {
