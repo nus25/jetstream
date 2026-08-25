@@ -15,13 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bluesky-social/jetstream/pkg/client"
-	"github.com/bluesky-social/jetstream/pkg/client/schedulers/parallel"
-	"github.com/bluesky-social/jetstream/pkg/consumer"
-	proxy "github.com/bluesky-social/jetstream/pkg/proxy"
-	"github.com/bluesky-social/jetstream/pkg/server"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/nus25/jetstream-proxy/pkg/consumer"
+	proxy "github.com/nus25/jetstream-proxy/pkg/proxy"
+	"github.com/nus25/jetstream-proxy/pkg/server"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/urfave/cli/v2"
@@ -36,10 +35,10 @@ func main() {
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
-			Name:    "ws-url",
+			Name:    "ingress-host",
 			Usage:   "full websocket path to the jetstream endpoint",
-			Value:   "ws://localhost:6008/subscribe",
-			EnvVars: []string{"JETSTREAM_WS_URL"},
+			Value:   "localhost:6008",
+			EnvVars: []string{"JETSTREAM_HOST"},
 		},
 		&cli.StringSliceFlag{
 			Name:    "wanted-collections",
@@ -47,17 +46,17 @@ func main() {
 			EnvVars: []string{"WANTED_COLLECTIONS"},
 		},
 		&cli.BoolFlag{
-			Name:    "ingress-commpression",
-			Usage:   "enable compression of incoming jetstream",
-			Value:   true,
+			Name:    "ingress-compression",
+			Usage:   "enable zstd compression of incoming jetstream",
+			Value:   false,
 			EnvVars: []string{"INGRESS_COMPRESSION"},
 		},
-		&cli.UintFlag{
-			Name:    "max-msg-size-bytes",
-			Usage:   "max message size Bytes of incoming jetstream. default is unlimited.",
-			Value:   0,
-			EnvVars: []string{"MAX_MSG_SIZE_BYTES"},
-		},
+		// &cli.UintFlag{
+		// 	Name:    "max-msg-size-bytes",
+		// 	Usage:   "max message size Bytes of incoming jetstream. default is unlimited.",
+		// 	Value:   0,
+		// 	EnvVars: []string{"MAX_MSG_SIZE_BYTES"},
+		// },
 		&cli.IntFlag{
 			Name:    "worker-count",
 			Usage:   "number of workers to process events",
@@ -106,11 +105,11 @@ func main() {
 			Value:   5_000,
 			EnvVars: []string{"JETSTREAM_MAX_SUB_RATE"},
 		},
-		&cli.Int64Flag{
-			Name:    "override-relay-cursor",
-			Usage:   "override cursor to start from, if not set will start from the last cursor in the database, if no cursor in the database will start from live, if set 0 force from live",
-			Value:   -1,
-			EnvVars: []string{"JETSTREAM_OVERRIDE_RELAY_CURSOR"},
+		&cli.Uint64Flag{
+			Name:    "override-relay-seq",
+			Usage:   "override sequence to start from, if not set will start from the last sequence in the database, if no sequence in the database will start from live, if set 0 force from live",
+			Value:   0,
+			EnvVars: []string{"JETSTREAM_OVERRIDE_RELAY_SEQ"},
 		},
 		&cli.DurationFlag{
 			Name:    "liveness-ttl",
@@ -137,9 +136,10 @@ func Jetstream(cctx *cli.Context) error {
 
 	log.Info("starting jetstream")
 
-	u, err := url.Parse(cctx.String("ws-url"))
+	host := cctx.String("ingress-host")
+	u, err := url.Parse("wss://" + host + "/subscribe")
 	if err != nil {
-		return fmt.Errorf("failed to parse ws-url: %w", err)
+		return fmt.Errorf("failed to parse ingress-host: %w", err)
 	}
 
 	s, err := server.NewServer(cctx.Float64("max-sub-rate"))
@@ -198,7 +198,7 @@ func Jetstream(cctx *cli.Context) error {
 	livenessCheckerShutdown := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(cctx.Duration("liveness-ttl"))
-		lastSeq := int64(0)
+		lastSeq := consumer.UnsetSeq
 		log := log.With("source", "liveness_checker")
 
 		for {
@@ -209,7 +209,11 @@ func Jetstream(cctx *cli.Context) error {
 				return
 			case <-ticker.C:
 				seq, _ := c.Progress.Get()
-				if seq == lastSeq && seq != 0 {
+				if seq == consumer.UnsetSeq {
+					log.Error("no events received yet.")
+					continue
+				}
+				if seq == lastSeq {
 					log.Error("no new events in last "+cctx.Duration("liveness-ttl").String()+", shutting down for docker to restart me", "seq", seq)
 					close(livenessKill)
 				} else {
@@ -293,40 +297,26 @@ func Jetstream(cctx *cli.Context) error {
 		close(metricsShutdown)
 	}()
 
-	var cursor *int64
-	cursorOverride := cctx.Int64("override-relay-cursor")
+	var seq uint64
+	cursorOverride := cctx.Uint64("override-relay-seq")
 
 	// If the last cursor in the database is set, use that as the cursor
-	if c.Progress.LastSeq >= 0 {
-		cursor = &c.Progress.LastSeq
+	if c.Progress.LastSeq > 0 {
+		seq = c.Progress.LastSeq
 	}
 
 	// If the override cursor is set, use that instead of the last cursor in the database
-	if cursorOverride >= 0 {
+	if cursorOverride > 0 {
 		log.Info("overriding cursor", "cursor", cursorOverride)
-		cursor = &cursorOverride
+		seq = cursorOverride
 	}
 
-	h := &proxy.Handler{
-		LastSeq:  -1,
-		Consumer: c,
-		NextMet:  -1,
-	}
-	logger := slog.Default()
-	//単一の非同期ワーカーとして動作させる。
-	sched := parallel.NewScheduler(1, "jetstream-proxy", logger, h.HandleEvent)
-	config := client.DefaultClientConfig()
+	config := proxy.DefaultClientConfig()
 	config.WantedCollections = cctx.StringSlice("wanted-collections")
-	config.WebsocketURL = u.String()
+	config.Host = u.String()
 	log.Info(strings.Join(config.WantedCollections, ","))
-	config.Compress = cctx.Bool("ingress-commpression")
-	config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
-
-	jsc, err := client.NewClient(config, log, sched)
-	if err != nil {
-		log.Error("failed to create jetstream client", "error", err)
-		return err
-	}
+	config.Zstd = cctx.Bool("ingress-compression")
+	//config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
 
 	// Create a channel that will be closed when we want to stop the application
 	// Usually when a critical routine returns an error
@@ -340,7 +330,7 @@ func Jetstream(cctx *cli.Context) error {
 		go func() {
 			//jetstream proxy
 			logger := log.With("source", "repo_stream")
-			err = proxy.HandleRepoStream(ctx, jsc, cursor)
+			err = proxy.HandleRepoStream(ctx, config, seq, c, logger)
 			if !errors.Is(err, context.Canceled) {
 				logger.Info("HandleRepoStream returned unexpectedly, killing jetstream proxy", "error", err)
 				close(eventsKill)

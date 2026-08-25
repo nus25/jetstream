@@ -1,21 +1,17 @@
 package proxy
 
 // jet stream proxy custormize code
-// based on  "github.com/bluesky-social/indigo/events"
 // nus
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/lex/util"
-	"github.com/bluesky-social/jetstream/pkg/client"
-	"github.com/bluesky-social/jetstream/pkg/consumer"
-	"github.com/bluesky-social/jetstream/pkg/models"
-	"github.com/labstack/gommon/log"
+	"github.com/bluesky-social/jetstream"
+	"github.com/nus25/jetstream-proxy/pkg/consumer"
 )
 
 type StreamHeader struct {
@@ -36,59 +32,86 @@ type StreamCommitMessage struct {
 
 // jetstreamエンドポイントと通信を行う。
 // 通信エラーの場合、接続を閉じてエラーを返す。
-func HandleRepoStream(ctx context.Context, cli *client.Client, cursor *int64) error {
+func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *consumer.Consumer, logger *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	h := &Handler{
+		LastSeq:  ^uint64(0),
+		Consumer: c,
+		NextMet:  -1,
+	}
+	host := strings.TrimPrefix(config.Host, "wss://")
+	host = strings.TrimSuffix(host, "/subscribe")
+	logger.Info("Connecting to jetstream", "host", host)
 
-	// 30秒おきにpingで回線チェック
-	go func() {
-		t := time.NewTicker(time.Second * 30)
-		defer t.Stop()
+	options := []jetstream.Option{
+		jetstream.WithZstdCompression(config.Zstd),
+		jetstream.WithLogger(logger),
+	}
+	if len(config.WantedCollections) > 0 {
+		options = append(options, jetstream.WithCollections(config.WantedCollections))
+		logger.Info("Filtering by collections", "collections", strings.Join(config.WantedCollections, ","))
+	}
+	if len(config.WantedDids) > 0 {
+		options = append(options, jetstream.WithDIDs(config.WantedDids))
+		logger.Info("Filtering by DIDs", "dids", strings.Join(config.WantedDids, ","))
+	}
+	if seq != consumer.UnsetSeq {
+		options = append(options, jetstream.WithLiveCursor(seq))
+		logger.Info("Starting from seq", "seq", seq)
+	}
 
-		for {
-
-			select {
-			case <-t.C:
-
-				if err := cli.SendPing(); err != nil {
-					log.Warnf("failed to ping: %s", err)
-				}
-			case <-ctx.Done():
-				log.Info("jetstream client closed.")
-				return
-			}
+	client, err := jetstream.Subscribe(
+		host, // "jetstream.us-east.bsky.network"
+		options...,
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+	for batch, err := range client.Events(context.Background()) {
+		if err != nil {
+			continue
 		}
-	}()
-
-	//接続開始
-	if err := cli.ConnectAndRead(ctx, cursor); err != nil {
-		if errors.Is(err, context.Canceled) {
-			// 正常なキャンセルの場合
-			return context.Canceled
+		for _, evt := range batch.Events() {
+			h.HandleEvent(ctx, &evt)
+			logger.Debug("Received event", "seq", evt.Seq, "time_us", evt.TimeUS, "identity", evt.Identity, "commit", evt.Commit)
 		}
-		if strings.Contains(err.Error(), "use of closed network connection") {
-			// 接続が閉じられた場合
-			return nil
-		}
-		// その他の予期せぬエラーの場合
-		return fmt.Errorf("failed to connect and read: %w", err)
 	}
 
 	return nil
 }
 
 type Handler struct {
-	LastSeq  int64
+	LastSeq  uint64
 	Consumer *consumer.Consumer
 	NextMet  int64
 }
+type ClientConfig struct {
+	Zstd              bool
+	Host              string
+	WantedDids        []string
+	WantedCollections []string
+}
+
+func DefaultClientConfig() *ClientConfig {
+	return &ClientConfig{
+		Zstd:              false,
+		Host:              "localhost:6008",
+		WantedDids:        []string{},
+		WantedCollections: []string{},
+	}
+}
 
 // jetstreamからのメッセージを受けてクライアント送信用スケジューラーにAddする
-func (h *Handler) HandleEvent(ctx context.Context, event *models.Event) error {
+func (h *Handler) HandleEvent(ctx context.Context, event *jetstream.Event) error {
 	// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
 	//todo：シーケンスが古い場合は無視
 	now := time.Now()
-	h.Consumer.Progress.Update(event.TimeUS, now)
+	//JSONのcursorフィールドはSeqとして扱われる
+	h.LastSeq = event.Seq
+	h.Consumer.Progress.Update(event.Seq, now)
+
 	h.Consumer.AddEvent(event)
 	if h.NextMet < event.TimeUS && event.Identity != nil {
 		t, _ := time.Parse(time.RFC3339, event.Identity.Time)

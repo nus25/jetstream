@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/jetstream/pkg/consumer"
-	"github.com/bluesky-social/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	"github.com/nus25/jetstream-proxy/pkg/consumer"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -286,7 +286,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 	}
 }
 
-func (s *Server) Emit(ctx context.Context, e *models.Event, asJSON, compBytes []byte) error {
+func (s *Server) Emit(ctx context.Context, e *jetstream.Event, asJSON, compBytes []byte) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
 
@@ -303,7 +303,7 @@ func (s *Server) Emit(ctx context.Context, e *models.Event, asJSON, compBytes []
 	bytesEmitted.Add(evtSize)
 
 	collection := ""
-	if e.Kind == models.EventKindCommit && e.Commit != nil {
+	if e.Kind == jetstream.KindCommit && e.Commit != nil {
 		collection = e.Commit.Collection
 	}
 
@@ -335,7 +335,7 @@ func (s *Server) Emit(ctx context.Context, e *models.Event, asJSON, compBytes []
 				getEventBytes = getCompressedEvent
 			}
 
-			emitToSubscriber(ctx, log, sub, e.TimeUS, e.Did, collection, false, getEventBytes)
+			emitToSubscriber(ctx, log, sub, e.TimeUS, e.DID, collection, false, getEventBytes)
 		}(sub)
 	}
 

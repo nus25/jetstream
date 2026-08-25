@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream"
 	"github.com/cockroachdb/pebble"
 	"github.com/goccy/go-json"
 	"github.com/labstack/gommon/log"
@@ -17,19 +17,21 @@ import (
 
 // Progress is the cursor for the consumer
 type Progress struct {
-	LastSeq            int64     `json:"last_seq"`
+	LastSeq            uint64    `json:"last_seq"`
 	LastSeqProcessedAt time.Time `json:"last_seq_processed_at"`
 	lk                 sync.RWMutex
 }
 
-func (p *Progress) Update(seq int64, processedAt time.Time) {
+const UnsetSeq = ^uint64(0)
+
+func (p *Progress) Update(seq uint64, processedAt time.Time) {
 	p.lk.Lock()
 	defer p.lk.Unlock()
 	p.LastSeq = seq
 	p.LastSeqProcessedAt = processedAt
 }
 
-func (p *Progress) Get() (int64, time.Time) {
+func (p *Progress) Get() (uint64, time.Time) {
 	p.lk.RLock()
 	defer p.lk.RUnlock()
 	return p.LastSeq, p.LastSeqProcessedAt
@@ -87,17 +89,17 @@ func (c *Consumer) ReadCursor(ctx context.Context) error {
 }
 
 // PersistEvent persists an event to PebbleDB
-func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event, asJSON, compBytes []byte) error {
+func (c *Consumer) PersistEvent(ctx context.Context, evt *jetstream.Event, asJSON, compBytes []byte) error {
 	ctx, span := tracer.Start(ctx, "PersistEvent")
 	defer span.End()
 
 	// Key structure for events in PebbleDB
 	// {{event_time_us}}_{{repo}}_{{collection}}
 	var key []byte
-	if evt.Kind == models.EventKindCommit && evt.Commit != nil {
-		key = []byte(fmt.Sprintf("%d_%s_%s", evt.TimeUS, evt.Did, evt.Commit.Collection))
+	if evt.Kind == jetstream.KindCommit && evt.Commit != nil {
+		key = []byte(fmt.Sprintf("%d_%s_%s", evt.TimeUS, evt.DID, evt.Commit.Collection))
 	} else {
-		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.Did))
+		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.DID))
 	}
 
 	// Write the uncompressed event to the uncompressed DB
