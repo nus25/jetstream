@@ -18,7 +18,7 @@ import (
 
 // Consumer is the consumer of the firehose
 type Consumer struct {
-	SocketURL         string
+	Host              string
 	Progress          *Progress
 	Emit              func(context.Context, *jetstream.Event, []byte, []byte) error
 	UncompressedDB    *pebble.DB
@@ -41,7 +41,7 @@ var tracer = otel.Tracer("consumer")
 func NewConsumer(
 	ctx context.Context,
 	logger *slog.Logger,
-	socketURL string,
+	host string,
 	dataDir string,
 	eventTTL time.Duration,
 	emit func(context.Context, *jetstream.Event, []byte, []byte) error,
@@ -72,7 +72,7 @@ func NewConsumer(
 	}
 
 	c := Consumer{
-		SocketURL: socketURL,
+		Host: host,
 		Progress: &Progress{
 			LastSeq: ^uint64(0),
 		},
@@ -86,9 +86,9 @@ func NewConsumer(
 		buf:               make(chan *jetstream.Event, 10_000),
 		sequencerShutdown: make(chan chan struct{}),
 
-		sequenced: eventsSequencedCounter.WithLabelValues(socketURL),
-		persisted: eventsPersistedCounter.WithLabelValues(socketURL),
-		emitted:   eventsEmittedCounter.WithLabelValues(socketURL),
+		sequenced: eventsSequencedCounter.WithLabelValues(host),
+		persisted: eventsPersistedCounter.WithLabelValues(host),
+		emitted:   eventsEmittedCounter.WithLabelValues(host),
 	}
 
 	// Check to see if the cursor exists

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -128,10 +129,16 @@ func Jetstream(cctx *cli.Context) error {
 
 	log.Info("starting jetstream")
 
-	host := cctx.String("ingress-host")
-	u, err := url.Parse("wss://" + host + "/subscribe")
-	if err != nil {
-		return fmt.Errorf("failed to parse ingress-host: %w", err)
+	u := &url.URL{
+		Host: cctx.String("ingress-host"),
+	}
+	switch u.Host {
+	case "":
+		return fmt.Errorf("failed to parse ingress-host: %s", cctx.String("ingress-host"))
+	default:
+		if strings.Contains(u.Host, "://") {
+			return fmt.Errorf("ingress-host should not contain scheme: %s", u.Host)
+		}
 	}
 
 	s, err := server.NewServer(cctx.Float64("max-sub-rate"))
@@ -142,7 +149,7 @@ func Jetstream(cctx *cli.Context) error {
 	c, err := consumer.NewConsumer(
 		ctx,
 		log,
-		u.String(),
+		u.Host,
 		cctx.String("data-dir"),
 		cctx.Duration("event-ttl"),
 		s.Emit,
@@ -309,7 +316,7 @@ func Jetstream(cctx *cli.Context) error {
 	}
 
 	config := proxy.DefaultClientConfig()
-	config.Host = u.String()
+	config.Host = u.Host
 	config.WantedCollections = cctx.StringSlice("wanted-collections")
 	config.WantedDids = cctx.StringSlice("wanted-dids")
 	//config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
