@@ -50,7 +50,6 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 	logger.Info("Connecting to jetstream", "host", host)
 
 	options := []jetstream.Option{
-		jetstream.WithZstdCompression(config.Zstd),
 		jetstream.WithLogger(logger),
 	}
 	if len(config.WantedCollections) > 0 {
@@ -64,6 +63,8 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 	if seq != consumer.UnsetSeq {
 		options = append(options, jetstream.WithLiveCursor(seq))
 		logger.Info("Starting from seq", "seq", seq)
+	} else {
+		logger.Info("Starting from live tail")
 	}
 
 	client, err := jetstream.Subscribe(
@@ -97,7 +98,6 @@ type Handler struct {
 	NextMet  int64
 }
 type ClientConfig struct {
-	Zstd              bool
 	Host              string
 	WantedDids        []string
 	WantedCollections []string
@@ -105,7 +105,6 @@ type ClientConfig struct {
 
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
-		Zstd:              false,
 		Host:              "localhost:6008",
 		WantedDids:        []string{},
 		WantedCollections: []string{},

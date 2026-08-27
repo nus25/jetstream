@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -45,11 +44,10 @@ func main() {
 			Usage:   "comma-separated list of collections",
 			EnvVars: []string{"WANTED_COLLECTIONS"},
 		},
-		&cli.BoolFlag{
-			Name:    "ingress-compression",
-			Usage:   "enable zstd compression of incoming jetstream",
-			Value:   false,
-			EnvVars: []string{"INGRESS_COMPRESSION"},
+		&cli.StringSliceFlag{
+			Name:    "wanted-dids",
+			Usage:   "comma-separated list of DIDs",
+			EnvVars: []string{"WANTED_DIDS"},
 		},
 		// &cli.UintFlag{
 		// 	Name:    "max-msg-size-bytes",
@@ -86,12 +84,6 @@ func main() {
 			Usage:   "directory to store data (pebbleDB)",
 			Value:   "./data",
 			EnvVars: []string{"JETSTREAM_DATA_DIR"},
-		},
-		&cli.StringFlag{
-			Name:     "zstd-dictionary-path",
-			Usage:    "path to the zstd dictionary file",
-			EnvVars:  []string{"JETSTREAM_ZSTD_DICTIONARY_PATH"},
-			Required: false,
 		},
 		&cli.DurationFlag{
 			Name:    "event-ttl",
@@ -297,8 +289,7 @@ func Jetstream(cctx *cli.Context) error {
 		close(metricsShutdown)
 	}()
 
-	var seq uint64
-	cursorOverride := cctx.Uint64("override-relay-seq")
+	var seq uint64 = consumer.UnsetSeq
 
 	// If the last cursor in the database is set, use that as the cursor
 	if c.Progress.LastSeq > 0 {
@@ -306,16 +297,21 @@ func Jetstream(cctx *cli.Context) error {
 	}
 
 	// If the override cursor is set, use that instead of the last cursor in the database
-	if cursorOverride > 0 {
-		log.Info("overriding cursor", "cursor", cursorOverride)
-		seq = cursorOverride
+	if cctx.IsSet("override-relay-seq") {
+		cursorOverride := cctx.Uint64("override-relay-seq")
+		if cursorOverride == 0 {
+			log.Warn("override-relay-seq is set to 0, start from livetail")
+			seq = consumer.UnsetSeq
+		} else {
+			log.Info("overriding cursor", "cursor", cursorOverride)
+			seq = cursorOverride
+		}
 	}
 
 	config := proxy.DefaultClientConfig()
-	config.WantedCollections = cctx.StringSlice("wanted-collections")
 	config.Host = u.String()
-	log.Info(strings.Join(config.WantedCollections, ","))
-	config.Zstd = cctx.Bool("ingress-compression")
+	config.WantedCollections = cctx.StringSlice("wanted-collections")
+	config.WantedDids = cctx.StringSlice("wanted-dids")
 	//config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
 
 	// Create a channel that will be closed when we want to stop the application
