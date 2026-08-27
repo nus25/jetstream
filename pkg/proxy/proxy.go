@@ -5,6 +5,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -32,9 +33,13 @@ type StreamCommitMessage struct {
 
 // jetstreamエンドポイントと通信を行う。
 // 通信エラーの場合、接続を閉じてエラーを返す。
-func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *consumer.Consumer, logger *slog.Logger) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *consumer.Consumer, logger *slog.Logger) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Recovered from panic", "error", r)
+			err = fmt.Errorf("Recovered from: %v", r)
+		}
+	}()
 	h := &Handler{
 		LastSeq:  ^uint64(0),
 		Consumer: c,
@@ -69,13 +74,17 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 		panic(err)
 	}
 	defer client.Close()
-	for batch, err := range client.Events(context.Background()) {
+
+	for batch, err := range client.Events(ctx) {
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			continue
 		}
+
 		for _, evt := range batch.Events() {
-			h.HandleEvent(ctx, &evt)
-			logger.Debug("Received event", "seq", evt.Seq, "time_us", evt.TimeUS, "identity", evt.Identity, "commit", evt.Commit)
+			h.HandleEvent(&evt)
 		}
 	}
 
@@ -104,7 +113,7 @@ func DefaultClientConfig() *ClientConfig {
 }
 
 // jetstreamからのメッセージを受けてクライアント送信用スケジューラーにAddする
-func (h *Handler) HandleEvent(ctx context.Context, event *jetstream.Event) error {
+func (h *Handler) HandleEvent(event *jetstream.Event) error {
 	// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
 	//todo：シーケンスが古い場合は無視
 	now := time.Now()

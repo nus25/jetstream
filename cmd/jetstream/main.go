@@ -331,11 +331,15 @@ func Jetstream(cctx *cli.Context) error {
 			//jetstream proxy
 			logger := log.With("source", "repo_stream")
 			err = proxy.HandleRepoStream(ctx, config, seq, c, logger)
-			if !errors.Is(err, context.Canceled) {
-				logger.Info("HandleRepoStream returned unexpectedly, killing jetstream proxy", "error", err)
-				close(eventsKill)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Info("handleRepoStream returned unexpectedly, killing jetstream proxy", "error", err)
+					close(eventsKill)
+				} else {
+					logger.Info("handleRepoStream closed on context cancel")
+				}
 			} else {
-				logger.Info("HandleRepoStream closed on context cancel")
+				logger.Info("handleRepoStream closed normally")
 			}
 			close(repoStreamShutdown)
 		}()
