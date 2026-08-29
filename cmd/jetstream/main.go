@@ -110,6 +110,12 @@ func main() {
 			Value:   15 * time.Second,
 			EnvVars: []string{"JETSTREAM_LIVENESS_TTL"},
 		},
+		&cli.BoolFlag{
+			Name:    "zstd-compression",
+			Usage:   "enable zstd compression for incoming events",
+			Value:   true,
+			EnvVars: []string{"JETSTREAM_ZSTD_COMPRESSION"},
+		},
 	}
 
 	app.Action = Jetstream

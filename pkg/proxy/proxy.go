@@ -72,6 +72,10 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 		//options = append(options, jetstream.WithMaxMsgSize(config.MaxMsgSizeBytes))
 		logger.Info("Setting max message size", "max_msg_size_bytes", config.MaxMsgSizeBytes)
 	}
+	if config.ZstdCompression {
+		options = append(options, jetstream.WithZstdCompression(config.ZstdCompression))
+		logger.Info("Enabling zstd compression")
+	}
 
 	client, err := jetstream.Subscribe(
 		host, // "jetstream.us-east.bsky.network"
@@ -108,6 +112,7 @@ type ClientConfig struct {
 	WantedDids        []string
 	WantedCollections []string
 	MaxMsgSizeBytes   uint32
+	ZstdCompression   bool
 }
 
 func DefaultClientConfig() *ClientConfig {
@@ -116,6 +121,7 @@ func DefaultClientConfig() *ClientConfig {
 		WantedDids:        []string{},
 		WantedCollections: []string{},
 		MaxMsgSizeBytes:   0,
+		ZstdCompression:   true,
 	}
 }
 
