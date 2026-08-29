@@ -33,6 +33,8 @@ type Consumer struct {
 	sequenced prometheus.Counter
 	persisted prometheus.Counter
 	emitted   prometheus.Counter
+
+	MaxMsgSizeBytes uint32 // instead of using the client's max message size option, handle it in the consumer
 }
 
 var tracer = otel.Tracer("consumer")
@@ -127,6 +129,12 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				asJSON, err := json.Marshal(e)
 				if err != nil {
 					log.Error("failed to marshal event", "error", err)
+					return
+				}
+
+				// Check event size instead of relying on the client's max message size option
+				if c.MaxMsgSizeBytes > 0 && uint32(len(asJSON)) > c.MaxMsgSizeBytes {
+					log.Info("event exceeds max message size", "size", len(asJSON), "max", c.MaxMsgSizeBytes)
 					return
 				}
 

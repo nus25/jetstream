@@ -66,6 +66,12 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 	} else {
 		logger.Info("Starting from live tail")
 	}
+	if config.MaxMsgSizeBytes > 0 {
+		//No option proviced by client. handle in consumer instead.
+		c.MaxMsgSizeBytes = config.MaxMsgSizeBytes
+		//options = append(options, jetstream.WithMaxMsgSize(config.MaxMsgSizeBytes))
+		logger.Info("Setting max message size", "max_msg_size_bytes", config.MaxMsgSizeBytes)
+	}
 
 	client, err := jetstream.Subscribe(
 		host, // "jetstream.us-east.bsky.network"
@@ -101,6 +107,7 @@ type ClientConfig struct {
 	Host              string
 	WantedDids        []string
 	WantedCollections []string
+	MaxMsgSizeBytes   uint32
 }
 
 func DefaultClientConfig() *ClientConfig {
@@ -108,6 +115,7 @@ func DefaultClientConfig() *ClientConfig {
 		Host:              "localhost:6008",
 		WantedDids:        []string{},
 		WantedCollections: []string{},
+		MaxMsgSizeBytes:   0,
 	}
 }
 

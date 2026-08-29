@@ -50,12 +50,12 @@ func main() {
 			Usage:   "comma-separated list of DIDs",
 			EnvVars: []string{"WANTED_DIDS"},
 		},
-		// &cli.UintFlag{
-		// 	Name:    "max-msg-size-bytes",
-		// 	Usage:   "max message size Bytes of incoming jetstream. default is unlimited.",
-		// 	Value:   0,
-		// 	EnvVars: []string{"MAX_MSG_SIZE_BYTES"},
-		// },
+		&cli.UintFlag{
+			Name:    "max-msg-size-bytes",
+			Usage:   "max message size Bytes of incoming jetstream. default is unlimited.",
+			Value:   0,
+			EnvVars: []string{"MAX_MSG_SIZE_BYTES"},
+		},
 		&cli.IntFlag{
 			Name:    "worker-count",
 			Usage:   "number of workers to process events",
@@ -319,7 +319,7 @@ func Jetstream(cctx *cli.Context) error {
 	config.Host = u.Host
 	config.WantedCollections = cctx.StringSlice("wanted-collections")
 	config.WantedDids = cctx.StringSlice("wanted-dids")
-	//config.MaxSize = uint32(cctx.Uint("max-msg-size-bytes"))
+	config.MaxMsgSizeBytes = uint32(cctx.Uint("max-msg-size-bytes"))
 
 	// Create a channel that will be closed when we want to stop the application
 	// Usually when a critical routine returns an error
