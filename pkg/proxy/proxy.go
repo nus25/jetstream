@@ -33,7 +33,7 @@ type StreamCommitMessage struct {
 
 // jetstreamエンドポイントと通信を行う。
 // 通信エラーの場合、接続を閉じてエラーを返す。
-func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *consumer.Consumer, logger *slog.Logger) (err error) {
+func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, maxEventAge time.Duration, c *consumer.Consumer, logger *slog.Logger) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Recovered from panic", "error", r)
@@ -77,6 +77,8 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 		logger.Info("Enabling zstd compression")
 	}
 
+	logger.Info("Max event age set", "max_event_age", maxEventAge)
+
 	client, err := jetstream.Subscribe(
 		host, // "jetstream.us-east.bsky.network"
 		options...,
@@ -95,6 +97,13 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, c *
 		}
 
 		for _, evt := range batch.Events() {
+			expiredDate := time.Now().Add(-maxEventAge).Format(time.RFC3339)
+			if maxEventAge > 0 && evt.Commit != nil && evt.Commit.Record["createdAt"] != nil {
+				if evt.Commit.Record["createdAt"].(string) < expiredDate {
+					jetstreamSkippedEvents.Inc()
+					continue
+				}
+			}
 			h.HandleEvent(&evt)
 		}
 	}

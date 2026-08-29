@@ -116,6 +116,12 @@ func main() {
 			Value:   true,
 			EnvVars: []string{"JETSTREAM_ZSTD_COMPRESSION"},
 		},
+		&cli.DurationFlag{
+			Name:    "max-event-age",
+			Usage:   "maximum age of an event createdAt timestamp, after which it is considered expired",
+			Value:   24 * time.Hour,
+			EnvVars: []string{"JETSTREAM_MAX_EVENT_AGE"},
+		},
 	}
 
 	app.Action = Jetstream
@@ -339,7 +345,7 @@ func Jetstream(cctx *cli.Context) error {
 		go func() {
 			//jetstream proxy
 			logger := log.With("source", "repo_stream")
-			err = proxy.HandleRepoStream(ctx, config, seq, c, logger)
+			err = proxy.HandleRepoStream(ctx, config, seq, cctx.Duration("max-event-age"), c, logger)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Info("handleRepoStream returned unexpectedly, killing jetstream proxy", "error", err)
