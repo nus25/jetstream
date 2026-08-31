@@ -10,25 +10,31 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bluesky-social/indigo/lex/util"
 	"github.com/bluesky-social/jetstream"
 	"github.com/nus25/jetstream-proxy/pkg/consumer"
 )
 
-type StreamHeader struct {
-	Kind   string `json:"kind"`
-	TimeUs int64  `json:"time_us"`
-	Did    string `json:"did"`
+type Handler struct {
+	LastSeq  uint64
+	Consumer *consumer.Consumer
+	NextMet  int64
+}
+type ClientConfig struct {
+	Host              string
+	WantedDids        []string
+	WantedCollections []string
+	MaxMsgSizeBytes   uint32
+	ZstdCompression   bool
 }
 
-type StreamCommitMessage struct {
-	StreamHeader
-	Commit struct {
-		Operation  string        `json:"operation"`
-		Collection string        `json:"collection"`
-		Rkey       string        `json:"rkey"`
-		Cid        *util.LexLink `json:"cid"`
-	} `json:"commit"`
+func DefaultClientConfig() *ClientConfig {
+	return &ClientConfig{
+		Host:              "localhost:6008",
+		WantedDids:        []string{},
+		WantedCollections: []string{},
+		MaxMsgSizeBytes:   0,
+		ZstdCompression:   true,
+	}
 }
 
 // jetstreamエンドポイントと通信を行う。
@@ -86,69 +92,47 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 	if err != nil {
 		panic(err)
 	}
-	defer client.Close()
-
-	for batch, err := range client.Events(ctx) {
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			continue
+	defer func() {
+		logger.Info("Closing client")
+		e := client.Close()
+		if e != nil {
+			logger.Error("Error closing client", "error", e)
 		}
+	}()
 
-		for _, evt := range batch.Events() {
-			expiredDate := time.Now().Add(-maxEventAge).Format(time.RFC3339)
-			if maxEventAge > 0 && evt.Commit != nil && evt.Commit.Record["createdAt"] != nil {
-				if evt.Commit.Record["createdAt"].(string) < expiredDate {
-					jetstreamSkippedEvents.Inc()
-					continue
+	go func() {
+		for batch, err := range client.Events(ctx) {
+			if err != nil {
+				continue
+			}
+
+			for _, evt := range batch.Events() {
+				// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
+				//JSONのcursorフィールドはSeqとして扱われる
+				h.LastSeq = evt.Seq
+				h.Consumer.Progress.Update(evt.Seq, time.Now())
+
+				// skip expired commit events
+				expiredDate := time.Now().Add(-maxEventAge).Format(time.RFC3339)
+				if maxEventAge > 0 && evt.Commit != nil && evt.Commit.Record["createdAt"] != nil {
+					if evt.Commit.Record["createdAt"].(string) < expiredDate {
+						jetstreamSkippedEvents.Inc()
+						continue
+					}
+				}
+
+				h.Consumer.AddEvent(&evt)
+				if h.NextMet < evt.TimeUS && evt.Identity != nil {
+					t, _ := time.Parse(time.RFC3339, evt.Identity.Time)
+					jetstreamDelay.Set(time.Since(t).Seconds())
+					//5秒に一回くらい更新
+					h.NextMet = evt.TimeUS + 5e+6
 				}
 			}
-			h.HandleEvent(&evt)
 		}
-	}
+	}()
 
-	return nil
-}
-
-type Handler struct {
-	LastSeq  uint64
-	Consumer *consumer.Consumer
-	NextMet  int64
-}
-type ClientConfig struct {
-	Host              string
-	WantedDids        []string
-	WantedCollections []string
-	MaxMsgSizeBytes   uint32
-	ZstdCompression   bool
-}
-
-func DefaultClientConfig() *ClientConfig {
-	return &ClientConfig{
-		Host:              "localhost:6008",
-		WantedDids:        []string{},
-		WantedCollections: []string{},
-		MaxMsgSizeBytes:   0,
-		ZstdCompression:   true,
-	}
-}
-
-// jetstreamからのメッセージを受けてクライアント送信用スケジューラーにAddする
-func (h *Handler) HandleEvent(event *jetstream.Event) error {
-	// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
-	//todo：シーケンスが古い場合は無視
-	now := time.Now()
-	//JSONのcursorフィールドはSeqとして扱われる
-	h.LastSeq = event.Seq
-	h.Consumer.Progress.Update(event.Seq, now)
-
-	h.Consumer.AddEvent(event)
-	if h.NextMet < event.TimeUS && event.Identity != nil {
-		t, _ := time.Parse(time.RFC3339, event.Identity.Time)
-		jetstreamDelay.Set(time.Since(t).Seconds())
-		//5秒に一回くらい更新
-		h.NextMet = event.TimeUS + 5e+6
-	}
-	return nil
+	<-ctx.Done()
+	logger.Info("repo stream closed")
+	return ctx.Err()
 }

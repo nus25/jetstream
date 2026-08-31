@@ -340,7 +340,6 @@ func Jetstream(cctx *cli.Context) error {
 	shutdownRepoStream := make(chan struct{})
 	repoStreamShutdown := make(chan struct{})
 	go func() {
-		ctx := context.Background()
 		ctx, cancel := context.WithCancel(ctx)
 		go func() {
 			//jetstream proxy
