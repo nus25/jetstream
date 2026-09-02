@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/jetstream"
@@ -29,6 +30,8 @@ type Consumer struct {
 	clock             *monotonic.Clock
 	buf               chan *jetstream.Event
 	sequencerShutdown chan chan struct{}
+	sequencerDone     chan struct{}
+	sequencerOnce     sync.Once
 
 	sequenced prometheus.Counter
 	persisted prometheus.Counter
@@ -87,6 +90,7 @@ func NewConsumer(
 		clock:             clock,
 		buf:               make(chan *jetstream.Event, 10_000),
 		sequencerShutdown: make(chan chan struct{}),
+		sequencerDone:     make(chan struct{}),
 
 		sequenced: eventsSequencedCounter.WithLabelValues(host),
 		persisted: eventsPersistedCounter.WithLabelValues(host),
@@ -111,6 +115,7 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 	log := c.logger.With("component", "sequencer")
 
 	go func() {
+		defer close(c.sequencerDone)
 		for {
 			select {
 			case <-ctx.Done():
@@ -118,6 +123,15 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				return
 			case s := <-c.sequencerShutdown:
 				log.Info("shutting down sequencer on shutdown signal")
+				err := c.UncompressedDB.Close()
+				if err != nil {
+					log.Error("failed to close pebble db", "error", err)
+				}
+
+				err = c.CompressedDB.Close()
+				if err != nil {
+					log.Error("failed to close compressed pebble db", "error", err)
+				}
 				s <- struct{}{}
 				return
 			case e := <-c.buf:
@@ -161,16 +175,36 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 }
 
 func (c *Consumer) Shutdown() {
-	shutdownTimeout := time.After(10 * time.Second)
-	shutdown := make(chan struct{})
-	c.sequencerShutdown <- shutdown
+	c.logger.Info("sending shutdown signal to sequencer")
+	c.sequencerOnce.Do(func() {
+		shutdownTimeout := time.NewTimer(10 * time.Second)
+		defer shutdownTimeout.Stop()
+		shutdown := make(chan struct{})
 
-	select {
-	case <-shutdownTimeout:
-		c.logger.Warn("sequencer shutdown timed out")
-	case <-shutdown:
-		c.logger.Info("sequencer shutdown complete")
-	}
+		select {
+		case <-c.sequencerDone:
+			return
+		default:
+		}
+
+		select {
+		case <-c.sequencerDone:
+			return
+		case c.sequencerShutdown <- shutdown:
+		case <-shutdownTimeout.C:
+			c.logger.Warn("sequencer shutdown signal timed out")
+			return
+		}
+
+		select {
+		case <-shutdown:
+			c.logger.Info("sequencer shutdown complete")
+		case <-c.sequencerDone:
+			c.logger.Info("sequencer stopped")
+		case <-shutdownTimeout.C:
+			c.logger.Warn("sequencer shutdown timed out")
+		}
+	})
 }
 
 func (c *Consumer) AddEvent(event *jetstream.Event) {

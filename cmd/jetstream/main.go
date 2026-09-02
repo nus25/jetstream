@@ -219,13 +219,15 @@ func Jetstream(cctx *cli.Context) error {
 				close(livenessCheckerShutdown)
 				return
 			case <-ticker.C:
-				seq, _ := c.Progress.Get()
+				seq, pAt := c.Progress.Get()
 				if seq == consumer.UnsetSeq {
 					log.Error("no events received yet.")
 					continue
 				}
 				if seq == lastSeq {
 					log.Error("no new events in last "+cctx.Duration("liveness-ttl").String()+", shutting down for docker to restart me", "seq", seq)
+					// log last status
+					log.Error("last known sequence: ", "seq", seq, "last processed at", pAt.Format(time.RFC3339))
 					close(livenessKill)
 				} else {
 					// Trim the database
@@ -408,6 +410,8 @@ func Jetstream(cctx *cli.Context) error {
 		log.Warn("Shutdown timeout reached for cursor manager")
 	}
 
+	c.Shutdown()
+
 	select {
 	case <-echoShutdown:
 		log.Info("Echo shutdown completed")
@@ -420,18 +424,6 @@ func Jetstream(cctx *cli.Context) error {
 		log.Info("Metrics shutdown completed")
 	case <-shutdownTimeout:
 		log.Warn("Shutdown timeout reached for metrics server")
-	}
-
-	c.Shutdown()
-
-	err = c.UncompressedDB.Close()
-	if err != nil {
-		log.Error("failed to close pebble db", "error", err)
-	}
-
-	err = c.CompressedDB.Close()
-	if err != nil {
-		log.Error("failed to close compressed pebble db", "error", err)
 	}
 
 	select {
