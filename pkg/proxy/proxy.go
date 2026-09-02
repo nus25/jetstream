@@ -131,6 +131,9 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 				}
 			}
 		}
+		if ctx.Err() == nil {
+			logger.Error("Event stream closed unexpectedly")
+		}
 	}()
 
 	<-ctx.Done()

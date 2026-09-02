@@ -225,9 +225,15 @@ func Jetstream(cctx *cli.Context) error {
 					continue
 				}
 				if seq == lastSeq {
-					log.Error("no new events in last "+cctx.Duration("liveness-ttl").String()+", shutting down for docker to restart me", "seq", seq)
-					// log last status
-					log.Error("last known sequence: ", "seq", seq, "last processed at", pAt.Format(time.RFC3339))
+					queueDepth, queueCapacity, sequencerStopped := c.PipelineStatus()
+					log.Error(
+						"no new events in last "+cctx.Duration("liveness-ttl").String()+", shutting down for docker to restart me",
+						"seq", seq,
+						"last_received_at", pAt.Format(time.RFC3339),
+						"queue_depth", queueDepth,
+						"queue_capacity", queueCapacity,
+						"sequencer_stopped", sequencerStopped,
+					)
 					close(livenessKill)
 				} else {
 					// Trim the database

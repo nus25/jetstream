@@ -148,8 +148,8 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 
 				// Check event size instead of relying on the client's max message size option
 				if c.MaxMsgSizeBytes > 0 && uint32(len(asJSON)) > c.MaxMsgSizeBytes {
-					log.Info("event exceeds max message size", "size", len(asJSON), "max", c.MaxMsgSizeBytes)
-					return
+					log.Warn("event exceeds max message size, skipping", "size", len(asJSON), "max", c.MaxMsgSizeBytes)
+					continue
 				}
 
 				// Compress the serialized JSON using zstd
@@ -209,4 +209,14 @@ func (c *Consumer) Shutdown() {
 
 func (c *Consumer) AddEvent(event *jetstream.Event) {
 	c.buf <- event
+}
+
+func (c *Consumer) PipelineStatus() (queueDepth, queueCapacity int, sequencerStopped bool) {
+	select {
+	case <-c.sequencerDone:
+		sequencerStopped = true
+	default:
+	}
+
+	return len(c.buf), cap(c.buf), sequencerStopped
 }
