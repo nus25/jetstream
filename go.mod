@@ -1,10 +1,10 @@
 module github.com/nus25/jetstream-proxy
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20251009212240-20524de167fe
-	github.com/bluesky-social/jetstream v0.2.0
+	github.com/bluesky-social/jetstream v0.2.2
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/goccy/go-json v0.10.6
 	github.com/gorilla/websocket v1.5.1
@@ -22,6 +22,7 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bluesky-social/gttp v0.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cockroachdb/errors v1.14.0 // indirect
 	github.com/cockroachdb/fifo v0.0.0-20240816210425-c5d0cb0b6fc0 // indirect
@@ -37,10 +38,9 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/ipfs/go-cid v0.4.1 // indirect
-	github.com/jcalabro/atmos v0.3.6 // indirect
+	github.com/jcalabro/atmos v0.4.0 // indirect
 	github.com/jcalabro/gloom v0.1.0 // indirect
 	github.com/jcalabro/gt v0.0.14 // indirect
-	github.com/jcalabro/jttp v0.0.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
