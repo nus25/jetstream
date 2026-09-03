@@ -138,17 +138,21 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				// Assign a time_us to the event
 				e.TimeUS = c.clock.Now()
 				c.sequenced.Inc()
+				if e.Commit != nil && e.Commit.RecordCBOR != nil {
+					// Clear the CBOR record to save memory before serialization
+					e.Commit.RecordCBOR = nil
+				}
 
 				// Serialize the event as JSON
 				asJSON, err := json.Marshal(e)
 				if err != nil {
-					log.Error("failed to marshal event", "error", err)
+					log.Error("failed to marshal event", "error", err, "event", e)
 					return
 				}
 
 				// Check event size instead of relying on the client's max message size option
 				if c.MaxMsgSizeBytes > 0 && uint32(len(asJSON)) > c.MaxMsgSizeBytes {
-					log.Warn("event exceeds max message size, skipping", "size", len(asJSON), "max", c.MaxMsgSizeBytes)
+					log.Info("event exceeds max message size, skipping", "size", len(asJSON), "max", c.MaxMsgSizeBytes)
 					continue
 				}
 
