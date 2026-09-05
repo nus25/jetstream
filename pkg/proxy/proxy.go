@@ -107,6 +107,7 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 				continue
 			}
 
+			cutoff := time.Now().Add(-maxEventAge)
 			for _, evt := range batch.Events() {
 				// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
 				//JSONのcursorフィールドはSeqとして扱われる
@@ -114,11 +115,14 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 				h.Consumer.Progress.Update(evt.Seq, time.Now())
 
 				// skip expired commit events
-				expiredDate := time.Now().Add(-maxEventAge).Format(time.RFC3339)
-				if maxEventAge > 0 && evt.Commit != nil && evt.Commit.Record["createdAt"] != nil {
-					if evt.Commit.Record["createdAt"].(string) < expiredDate {
-						jetstreamSkippedEvents.Inc()
-						continue
+				if maxEventAge > 0 && evt.Commit != nil {
+					createdAt, ok := evt.Commit.Record["createdAt"].(string)
+					if ok {
+						createdTime, err := time.Parse(time.RFC3339Nano, createdAt)
+						if err == nil && createdTime.Before(cutoff) {
+							jetstreamSkippedEvents.Inc()
+							continue
+						}
 					}
 				}
 
