@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20251009212240-20524de167fe
-	github.com/bluesky-social/jetstream v0.2.2
+	github.com/bluesky-social/jetstream v0.2.5
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/goccy/go-json v0.10.6
 	github.com/gorilla/websocket v1.5.1

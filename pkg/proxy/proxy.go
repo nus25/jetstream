@@ -66,6 +66,7 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 		options = append(options, jetstream.WithDIDs(config.WantedDids))
 		logger.Info("Filtering by DIDs", "dids", strings.Join(config.WantedDids, ","))
 	}
+	options = append(options, jetstream.WithCursorMode(jetstream.CursorTime))
 	if seq != consumer.UnsetSeq {
 		options = append(options, jetstream.WithLiveCursor(seq))
 		logger.Info("Starting from seq", "seq", seq)
@@ -106,14 +107,9 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 				logger.Warn("Error receiving events", "error", err)
 				continue
 			}
-
 			cutoff := time.Now().Add(-maxEventAge)
 			for _, evt := range batch.Events() {
 				// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
-				//JSONのcursorフィールドはSeqとして扱われる
-				h.LastSeq = evt.Seq
-				h.Consumer.Progress.Update(evt.Seq, time.Now())
-
 				// skip expired commit events
 				if maxEventAge > 0 && evt.Commit != nil {
 					createdAt, ok := evt.Commit.Record["createdAt"].(string)
@@ -125,7 +121,6 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 						}
 					}
 				}
-
 				h.Consumer.AddEvent(&evt)
 				if h.NextMet < evt.TimeUS && evt.Identity != nil {
 					t, _ := time.Parse(time.RFC3339, evt.Identity.Time)
@@ -134,6 +129,9 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 					h.NextMet = evt.TimeUS + 5e+6
 				}
 			}
+
+			h.LastSeq = batch.LastCursor()
+			h.Consumer.Progress.Update(batch.LastCursor(), time.Now())
 		}
 		if ctx.Err() == nil {
 			logger.Error("Event stream closed unexpectedly")

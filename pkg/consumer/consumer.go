@@ -142,6 +142,9 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 					// Clear the CBOR record to save memory before serialization
 					e.Commit.RecordCBOR = nil
 				}
+				// treat as v1 event by using the witnessed timestamp as the event time
+				e.TimeUS = e.WitnessedAtUS
+				e.WitnessedAtUS = 0
 
 				// Serialize the event as JSON
 				asJSON, err := json.Marshal(e)

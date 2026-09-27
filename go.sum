@@ -6,8 +6,8 @@ github.com/bluesky-social/gttp v0.1.0 h1:jsG6ssqLYboxxdx+eBScIvKfMfBB6qvN8E4SW+N
 github.com/bluesky-social/gttp v0.1.0/go.mod h1:TPtZ67MOhePifYaztEI42hUhluaE2GJ33+oFxPermuw=
 github.com/bluesky-social/indigo v0.0.0-20251009212240-20524de167fe h1:VBhaqE5ewQgXbY5SfSWFZC/AwHFo7cHxZKFYi2ce9Yo=
 github.com/bluesky-social/indigo v0.0.0-20251009212240-20524de167fe/go.mod h1:RuQVrCGm42QNsgumKaR6se+XkFKfCPNwdCiTvqKRUck=
-github.com/bluesky-social/jetstream v0.2.2 h1:/sECuWMfPimwcv06IX+PExLqujND7Q52uZgfejHcTJk=
-github.com/bluesky-social/jetstream v0.2.2/go.mod h1:grkENUXlo6RuMec66MfyfB3tMCoNfjlgFvH3oNTS8Zw=
+github.com/bluesky-social/jetstream v0.2.5 h1:RLUpnrbRbtx2cfLP5ttZ5YVFQMVGlt8XR31uLOnoS5o=
+github.com/bluesky-social/jetstream v0.2.5/go.mod h1:XtMq1BHeNqoXmPbuJAzQqljE0bpfjSi2bAk4iy1d57Y=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cockroachdb/datadriven v1.0.3-0.20230413201302-be42291fc80f h1:otljaYPt5hWxV3MUfO5dFPFiOXg9CyG5/kCfayTqsJ4=
