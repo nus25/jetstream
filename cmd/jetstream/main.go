@@ -30,7 +30,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream-proxy",
 		Usage:   "jetstream proxy service",
-		Version: "1.0.7",
+		Version: "2.0.8",
 	}
 
 	app.Flags = []cli.Flag{
