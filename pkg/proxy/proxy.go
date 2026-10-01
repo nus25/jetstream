@@ -21,6 +21,7 @@ type Handler struct {
 }
 type ClientConfig struct {
 	Host              string
+	FailoverHost      string
 	WantedDids        []string
 	WantedCollections []string
 	MaxMsgSizeBytes   uint32
@@ -30,6 +31,7 @@ type ClientConfig struct {
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		Host:              "localhost:6008",
+		FailoverHost:      "",
 		WantedDids:        []string{},
 		WantedCollections: []string{},
 		MaxMsgSizeBytes:   0,
@@ -57,6 +59,13 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 
 	options := []jetstream.Option{
 		jetstream.WithLogger(logger),
+	}
+	if config.FailoverHost != "" {
+		fallbackHost := strings.TrimPrefix(config.FailoverHost, "wss://")
+		fallbackHost = strings.TrimSuffix(fallbackHost, "/subscribe")
+		options = append(options, jetstream.WithFailoverHosts(fallbackHost))
+		options = append(options, jetstream.WithFailoverRewind(1*time.Second))
+		logger.Info("Using fallback host", "fallback_host", fallbackHost)
 	}
 	if len(config.WantedCollections) > 0 {
 		options = append(options, jetstream.WithCollections(config.WantedCollections))

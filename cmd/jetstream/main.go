@@ -30,7 +30,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream-proxy",
 		Usage:   "jetstream proxy service",
-		Version: "2.0.8",
+		Version: "2.1.0",
 	}
 
 	app.Flags = []cli.Flag{
@@ -39,6 +39,12 @@ func main() {
 			Usage:   "full websocket path to the jetstream endpoint",
 			Value:   "localhost:6008",
 			EnvVars: []string{"JETSTREAM_HOST"},
+		},
+		&cli.StringFlag{
+			Name:    "failover-host",
+			Usage:   "full websocket path to the failover jetstream endpoint",
+			Value:   "localhost:6008",
+			EnvVars: []string{"JETSTREAM_FAILOVER_HOST"},
 		},
 		&cli.StringSliceFlag{
 			Name:    "wanted-collections",
@@ -151,6 +157,12 @@ func Jetstream(cctx *cli.Context) error {
 		if strings.Contains(u.Host, "://") {
 			return fmt.Errorf("ingress-host should not contain scheme: %s", u.Host)
 		}
+	}
+	fu := &url.URL{
+		Host: cctx.String("failover-host"),
+	}
+	if strings.Contains(fu.Host, "://") {
+		return fmt.Errorf("failover-host should not contain scheme: %s", fu.Host)
 	}
 
 	s, err := server.NewServer(cctx.Float64("max-sub-rate"))
@@ -338,6 +350,7 @@ func Jetstream(cctx *cli.Context) error {
 
 	config := proxy.DefaultClientConfig()
 	config.Host = u.Host
+	config.FailoverHost = fu.Host
 	config.WantedCollections = cctx.StringSlice("wanted-collections")
 	config.WantedDids = cctx.StringSlice("wanted-dids")
 	config.MaxMsgSizeBytes = uint32(cctx.Uint("max-msg-size-bytes"))
