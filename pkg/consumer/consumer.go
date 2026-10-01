@@ -33,9 +33,10 @@ type Consumer struct {
 	sequencerDone     chan struct{}
 	sequencerOnce     sync.Once
 
-	sequenced prometheus.Counter
-	persisted prometheus.Counter
-	emitted   prometheus.Counter
+	sequenced  prometheus.Counter
+	persisted  prometheus.Counter
+	emitted    prometheus.Counter
+	queueDepth prometheus.Gauge
 
 	MaxMsgSizeBytes uint32 // instead of using the client's max message size option, handle it in the consumer
 }
@@ -92,9 +93,10 @@ func NewConsumer(
 		sequencerShutdown: make(chan chan struct{}),
 		sequencerDone:     make(chan struct{}),
 
-		sequenced: eventsSequencedCounter.WithLabelValues(host),
-		persisted: eventsPersistedCounter.WithLabelValues(host),
-		emitted:   eventsEmittedCounter.WithLabelValues(host),
+		sequenced:  eventsSequencedCounter.WithLabelValues(host),
+		persisted:  eventsPersistedCounter.WithLabelValues(host),
+		emitted:    eventsEmittedCounter.WithLabelValues(host),
+		queueDepth: queueDepthGauge.WithLabelValues(host),
 	}
 
 	// Check to see if the cursor exists
@@ -135,6 +137,7 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				s <- struct{}{}
 				return
 			case e := <-c.buf:
+				c.queueDepth.Set(float64(len(c.buf)))
 				// Assign a time_us to the event
 				e.TimeUS = c.clock.Now()
 				c.sequenced.Inc()
@@ -216,6 +219,7 @@ func (c *Consumer) Shutdown() {
 
 func (c *Consumer) AddEvent(event *jetstream.Event) {
 	c.buf <- event
+	c.queueDepth.Set(float64(len(c.buf)))
 }
 
 func (c *Consumer) PipelineStatus() (queueDepth, queueCapacity int, sequencerStopped bool) {

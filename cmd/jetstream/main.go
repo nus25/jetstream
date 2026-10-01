@@ -210,6 +210,8 @@ func Jetstream(cctx *cli.Context) error {
 	go func() {
 		livenessTTL := cctx.Duration("liveness-ttl")
 		ticker := time.NewTicker(livenessTTL)
+		defer ticker.Stop()
+		defer close(livenessCheckerShutdown)
 		startedAt := time.Now()
 		log := log.With("source", "liveness_checker")
 
@@ -217,10 +219,9 @@ func Jetstream(cctx *cli.Context) error {
 			select {
 			case <-shutdownLivenessChecker:
 				log.Info("shutting down liveness checker")
-				close(livenessCheckerShutdown)
 				return
 			case <-ticker.C:
-				_, lastReceivedAt := c.Progress.Get()
+				lastCursor, lastReceivedAt := c.Progress.Get()
 				if lastReceivedAt.Before(startedAt) {
 					lastReceivedAt = startedAt
 				}
@@ -228,6 +229,7 @@ func Jetstream(cctx *cli.Context) error {
 					queueDepth, queueCapacity, sequencerStopped := c.PipelineStatus()
 					log.Error(
 						"no events received in last "+livenessTTL.String()+", shutting down for docker to restart me",
+						"last_cursor", lastCursor,
 						"last_received_at", lastReceivedAt.Format(time.RFC3339),
 						"queue_depth", queueDepth,
 						"queue_capacity", queueCapacity,
@@ -242,7 +244,7 @@ func Jetstream(cctx *cli.Context) error {
 				if err != nil {
 					log.Error("failed to trim events", "error", err)
 				}
-				log.Info("successful liveness check and trim", "last_received_at", lastReceivedAt.Format(time.RFC3339))
+				log.Info("successful liveness check and trim", "last_cursor", lastCursor, "last_received_at", lastReceivedAt.Format(time.RFC3339))
 			}
 		}
 	}()

@@ -19,3 +19,8 @@ var eventsEmittedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "consumer_events_emitted_total",
 	Help: "The total number of events emitted",
 }, []string{"host"})
+
+var queueDepthGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "consumer_queue_depth",
+	Help: "The number of events waiting in the consumer queue",
+}, []string{"host"})
