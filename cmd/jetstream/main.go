@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -30,7 +32,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream-proxy",
 		Usage:   "jetstream proxy service",
-		Version: "2.1.0",
+		Version: "2.1.1",
 	}
 
 	app.Flags = []cli.Flag{
@@ -348,6 +350,13 @@ func Jetstream(cctx *cli.Context) error {
 		}
 	}
 
+	if cursorOverride, found, err := readCursorOverride(cctx.String("data-dir")); err != nil {
+		return err
+	} else if found {
+		log.Info("overriding cursor from file", "cursor", cursorOverride)
+		seq = cursorOverride
+	}
+
 	config := proxy.DefaultClientConfig()
 	config.Host = u.Host
 	config.FailoverHost = fu.Host
@@ -455,4 +464,31 @@ func Jetstream(cctx *cli.Context) error {
 	log.Info("shut down successfully")
 
 	return nil
+}
+
+type cursorOverrideFile struct {
+	Cursor uint64 `json:"cursor"`
+}
+
+func readCursorOverride(dataDir string) (uint64, bool, error) {
+	overridePath := filepath.Join(dataDir, "cursor_override.json")
+	contents, err := os.ReadFile(overridePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read cursor override: %w", err)
+	}
+
+	var override cursorOverrideFile
+	if err := json.Unmarshal(contents, &override); err != nil {
+		return 0, false, fmt.Errorf("parse cursor override: %w", err)
+	}
+
+	donePath := filepath.Join(dataDir, "cursor_override_done.json")
+	if err := os.Rename(overridePath, donePath); err != nil {
+		return 0, false, fmt.Errorf("rename cursor override: %w", err)
+	}
+
+	return override.Cursor, true, nil
 }
