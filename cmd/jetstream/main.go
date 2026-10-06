@@ -241,16 +241,15 @@ func Jetstream(cctx *cli.Context) error {
 				}
 				if time.Since(lastReceivedAt) >= livenessTTL {
 					queueDepth, queueCapacity, sequencerStopped := c.PipelineStatus()
-					log.Error(
-						"no events received in last "+livenessTTL.String()+", shutting down for docker to restart me",
+					log.Warn(
+						"no events received in last "+livenessTTL.String()+" minutes",
 						"last_cursor", lastCursor,
 						"last_received_at", lastReceivedAt.Format(time.RFC3339),
 						"queue_depth", queueDepth,
 						"queue_capacity", queueCapacity,
 						"sequencer_stopped", sequencerStopped,
 					)
-					close(livenessKill)
-					return
+					continue
 				}
 
 				// Trim the database
