@@ -32,7 +32,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream-proxy",
 		Usage:   "jetstream proxy service",
-		Version: "2.1.1",
+		Version: "2.1.2",
 	}
 
 	app.Flags = []cli.Flag{
@@ -147,7 +147,7 @@ func Jetstream(cctx *cli.Context) error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(log)
 
-	log.Info("starting jetstream")
+	log.Info("starting jetstream ", "version", cctx.App.Version)
 
 	u := &url.URL{
 		Host: cctx.String("ingress-host"),
