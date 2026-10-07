@@ -114,6 +114,7 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 		for batch, err := range client.Events(ctx) {
 			if err != nil {
 				logger.Warn("Error receiving events", "error", err)
+				jetstreamReceiveErrors.Inc()
 				continue
 			}
 			cutoff := time.Now().Add(-maxEventAge)
