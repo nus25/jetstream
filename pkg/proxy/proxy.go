@@ -17,7 +17,6 @@ import (
 type Handler struct {
 	LastSeq  uint64
 	Consumer *consumer.Consumer
-	NextMet  int64
 }
 type ClientConfig struct {
 	Host              string
@@ -51,7 +50,6 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 	h := &Handler{
 		LastSeq:  ^uint64(0),
 		Consumer: c,
-		NextMet:  -1,
 	}
 	host := strings.TrimPrefix(config.Host, "wss://")
 	host = strings.TrimSuffix(host, "/subscribe")
@@ -111,6 +109,8 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 	}()
 
 	go func() {
+		nextMet := int64(-1)
+		lastSeen := time.Now()
 		for batch, err := range client.Events(ctx) {
 			if err != nil {
 				logger.Warn("Error receiving events", "error", err)
@@ -119,7 +119,6 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 			}
 			cutoff := time.Now().Add(-maxEventAge)
 			for _, evt := range batch.Events() {
-				// commit, handle,identity ,identity,info,migrate,tombstone,labelsまとめて処理
 				// skip expired commit events
 				if maxEventAge > 0 && evt.Commit != nil {
 					createdAt, ok := evt.Commit.Record["createdAt"].(string)
@@ -132,11 +131,16 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 					}
 				}
 				h.Consumer.AddEvent(&evt)
-				if h.NextMet < evt.TimeUS && evt.Identity != nil {
+
+				// update delay metrics approximately every 5 seconds
+				if nextMet < evt.TimeUS && evt.Identity != nil {
 					t, _ := time.Parse(time.RFC3339, evt.Identity.Time)
+					if t.Before(lastSeen) || t.After(time.Now()) {
+						continue
+					}
+					lastSeen = t
 					jetstreamDelay.Set(time.Since(t).Seconds())
-					//5秒に一回くらい更新
-					h.NextMet = evt.TimeUS + 5e+6
+					nextMet = evt.TimeUS + 5e+6
 				}
 			}
 
