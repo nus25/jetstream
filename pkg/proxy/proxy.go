@@ -110,7 +110,7 @@ func HandleRepoStream(ctx context.Context, config *ClientConfig, seq uint64, max
 
 	go func() {
 		nextMet := int64(-1)
-		lastSeen := time.Now()
+		var lastSeen time.Time = time.Time{}
 		for batch, err := range client.Events(ctx) {
 			if err != nil {
 				logger.Warn("Error receiving events", "error", err)
